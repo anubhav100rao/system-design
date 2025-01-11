@@ -98,7 +98,7 @@ func (p *Philosopher) eat() {
 	p.leftFork.Unlock()
 }
 
-func main() {
+func RunDiningProblemSimulation() {
 	rand.Seed(time.Now().UnixNano())
 	table := NewDiningTable(5)
 
