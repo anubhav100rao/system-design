@@ -60,7 +60,6 @@ dist_after_add.columns = ['Node', 'After Add D Count']
 moved_after_add = [
     key for key in keys if mapping_initial[key] != mapping_after_add[key]]
 
-# Remove node B and re-map
 ring.remove_node("B")  # Removing the database B
 mapping_after_remove = {key: ring.get_node(key) for key in keys}
 dist_after_remove = pd.Series(
