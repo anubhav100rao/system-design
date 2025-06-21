@@ -63,7 +63,7 @@ func (rw *RWLock) Unlock() {
 	rw.cond.Broadcast()     // Notify all waiting readers and writers
 }
 
-func main() {
+func main_producer_consumer() {
 	lock := NewRWLock()
 	var wg sync.WaitGroup
 

@@ -1,90 +1,123 @@
-import bisect
+import matplotlib.pyplot as plt
 import hashlib
+import bisect
+import pandas as pd
 
 
-class ConsistentHashing:
-    def __init__(self, num_replicas=3):
-        """
-        Initialize consistent hashing.
-        :param num_replicas: Number of virtual replicas per node to ensure even key distribution.
-        """
-        self.num_replicas = num_replicas
-        self.ring = {}  # Mapping of hash value to node
-        self.sorted_hashes = []  # Sorted list of hash values (ring positions)
+class ConsistentHashRing:
+    def __init__(self, nodes=None, replicas=100):
+        self.replicas = replicas
+        self.ring = {}  # map <database_id -> hash_value>
+        self.sorted_hashes = []
+        if nodes:
+            for node in nodes:
+                self.add_node(node)
 
     def _hash(self, key):
-        """
-        Generate a hash for a given key using SHA-256.
-        """
-        return int(hashlib.sha256(key.encode('utf-8')).hexdigest(), 16)
+        h = hashlib.md5(key.encode('utf-8')).hexdigest()
+        return int(h, 16)
 
     def add_node(self, node):
-        """
-        Add a new node to the hash ring.
-        :param node: Node identifier (e.g., IP address or node name).
-        """
-        for i in range(self.num_replicas):
-            virtual_node = f"{node}:{i}"  # Virtual node name
-            hash_val = self._hash(virtual_node)
-            self.ring[hash_val] = node
-            bisect.insort(self.sorted_hashes, hash_val)
+        for i in range(self.replicas):
+            replica_key = f"{node}:{i}"
+            h = self._hash(replica_key)
+            self.ring[h] = node
+            bisect.insort(self.sorted_hashes, h)
 
     def remove_node(self, node):
-        """
-        Remove a node and its replicas from the hash ring.
-        :param node: Node identifier.
-        """
-        for i in range(self.num_replicas):
-            virtual_node = f"{node}:{i}"
-            hash_val = self._hash(virtual_node)
-            self.ring.pop(hash_val, None)
-            self.sorted_hashes.remove(hash_val)
+        for i in range(self.replicas):
+            replica_key = f"{node}:{i}"
+            h = self._hash(replica_key)
+            if h in self.ring:
+                del self.ring[h]
+            idx = bisect.bisect_left(self.sorted_hashes, h)
+            if idx < len(self.sorted_hashes) and self.sorted_hashes[idx] == h:
+                self.sorted_hashes.pop(idx)
 
     def get_node(self, key):
-        """
-        Get the node responsible for a given key.
-        :param key: The key to look up.
-        :return: The node responsible for the key.
-        """
         if not self.ring:
             return None
-        hash_val = self._hash(key)
-        idx = bisect.bisect(self.sorted_hashes, hash_val)
+        h = self._hash(key)
+        idx = bisect.bisect(self.sorted_hashes, h)
         if idx == len(self.sorted_hashes):
-            idx = 0  # Wrap around to the first node
+            idx = 0  # circular ring, connecting first and last element
         return self.ring[self.sorted_hashes[idx]]
 
-    def display_ring(self):
-        """
-        Display the current hash ring for debugging purposes.
-        """
-        for hash_val in self.sorted_hashes:
-            print(f"Hash: {hash_val}, Node: {self.ring[hash_val]}")
+
+nodes_initial = ["A", "B", "C"]
+ring = ConsistentHashRing(nodes_initial, replicas=10)
+
+keys = [f"key{i}" for i in range(1, 51)]  # product_id = [1, 2, 3, 4 ... 50]
+mapping_initial = {key: ring.get_node(key) for key in keys}
+dist_initial = pd.Series(mapping_initial).value_counts().reset_index()
+dist_initial.columns = ['Node', 'Initial Count']
+
+ring.add_node("D")  # Adding a new database D
+mapping_after_add = {key: ring.get_node(key) for key in keys}
+dist_after_add = pd.Series(mapping_after_add).value_counts().reset_index()
+dist_after_add.columns = ['Node', 'After Add D Count']
+
+moved_after_add = [
+    key for key in keys if mapping_initial[key] != mapping_after_add[key]]
+
+# Remove node B and re-map
+ring.remove_node("B")  # Removing the database B
+mapping_after_remove = {key: ring.get_node(key) for key in keys}
+dist_after_remove = pd.Series(
+    mapping_after_remove).value_counts().reset_index()
+dist_after_remove.columns = ['Node', 'After Remove B Count']
+
+# Keys that moved after removing B
+moved_after_remove = [
+    key for key in keys if mapping_after_add[key] != mapping_after_remove[key]]
+
+# Create summary of a few keys
+example_keys = ["key1", "key10", "key20", "key30", "key40", "key50"]
+summary_table = pd.DataFrame({
+    "Key": example_keys,
+    "Initial": [mapping_initial[k] for k in example_keys],
+    "After Add D": [mapping_after_add[k] for k in example_keys],
+    "After Remove B": [mapping_after_remove[k] for k in example_keys],
+})
+
+(dist_initial, dist_after_add, moved_after_add,
+ dist_after_remove, moved_after_remove, summary_table)
+
+print(dist_initial)
+print(dist_after_add)
+print(moved_after_add)
+print(dist_after_remove)
+print(moved_after_remove)
+print(summary_table)
 
 
-# Create a consistent hashing instance
-ch = ConsistentHashing(num_replicas=3)
+# Plotting function
 
-# Add nodes to the hash ring
-ch.add_node("NodeA")
-ch.add_node("NodeB")
-ch.add_node("NodeC")
+# Combined plot for all distributions
+fig, axs = plt.subplots(1, 3, figsize=(15, 4), sharey=True)
 
-# Display the hash ring
-print("Initial hash ring:")
-ch.display_ring()
+# Plot Initial Distribution
+axs[0].bar(dist_initial['Node'],
+           dist_initial['Initial Count'], color='skyblue')
+axs[0].set_title("Initial (A, B, C)")
+axs[0].set_xlabel("Node")
+axs[0].set_ylabel("Key Count")
+axs[0].grid(axis='y', linestyle='--', alpha=0.7)
 
-# Lookup which node a key belongs to
-keys = ["key1", "key2", "key3", "key4", "key5"]
-for key in keys:
-    print(f"Key '{key}' is assigned to node: {ch.get_node(key)}")
+# Plot After Adding Node D
+axs[1].bar(dist_after_add['Node'],
+           dist_after_add['After Add D Count'], color='lightgreen')
+axs[1].set_title("After Adding Node D")
+axs[1].set_xlabel("Node")
+axs[1].grid(axis='y', linestyle='--', alpha=0.7)
 
-# Remove a node
-ch.remove_node("NodeB")
-print("\nHash ring after removing NodeB:")
-ch.display_ring()
+# Plot After Removing Node B
+axs[2].bar(dist_after_remove['Node'],
+           dist_after_remove['After Remove B Count'], color='salmon')
+axs[2].set_title("After Removing Node B")
+axs[2].set_xlabel("Node")
+axs[2].grid(axis='y', linestyle='--', alpha=0.7)
 
-# Re-check which node keys belong to
-for key in keys:
-    print(f"Key '{key}' is assigned to node: {ch.get_node(key)}")
-
+plt.suptitle("Consistent Hashing Key Distribution", fontsize=14)
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+plt.show()
