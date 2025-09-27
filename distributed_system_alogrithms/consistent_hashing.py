@@ -45,6 +45,11 @@ class ConsistentHashRing:
 
 
 nodes_initial = ["A", "B", "C"]
+# A1 A2 A3 .... A10 => server A
+# B1 B2 B3....  B10 => server B
+# C1 C2 C3 ... C10 => server C
+
+
 ring = ConsistentHashRing(nodes_initial, replicas=10)
 
 keys = [f"key{i}" for i in range(1, 51)]  # product_id = [1, 2, 3, 4 ... 50]
